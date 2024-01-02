@@ -5,24 +5,36 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
 
-#define NUM_PLACES 5
-#define NUM_PARKING 5
-#define NUM_USERS 50
-#define MAX_WAIT_SECONDS 20
 #define VERT "\033[00;32m"
 #define ROUGE "\033[00;31m"
 #define JAUNE "\033[00;33m"
 #define BLEU "\033[0;34m"
 #define ORANGE "\033[38;5;208m"
 
-sem_t sem_parking[NUM_PARKING];
-sem_t sem_queue_departure[NUM_PARKING];
-sem_t sem_queue_arrival[NUM_PARKING];
-pthread_t users[NUM_USERS];    
-int parking[NUM_PARKING][NUM_PLACES];
-int places_occupees[NUM_PARKING];
-int statuts[NUM_USERS][2];
+FILE *fs;
+
+sem_t *sem_parking;
+sem_t *sem_queue_departure;
+sem_t *sem_queue_arrival;
+
+pthread_t *users;    
+
+int NUM_PLACES = 0;
+int NUM_PARKING = 0;
+int NUM_USERS = 0;
+int TIEMPO_MIN_COGER = 0;
+int TIEMPO_MAX_COGER = 0;
+int TIEMPO_MIN_MONTANDO = 0;
+int TIEMPO_MAX_MONTANDO = 0;
+int values[7];
+
+int **parking;
+int **statuts;
+int *places_occupees;
 int shouldTerminate = 1;
 
 // Arguments des fonctions des threads
@@ -32,23 +44,99 @@ typedef struct {
     int tentatives;
 } TypeData;
 
+int openFile(char *nombre_fe) {
+    FILE *fe;
+    int i = 0;
+    char entrada[100];
+    char buffer[1024];
+    
+    strcpy(entrada, nombre_fe);
+
+    if ((fe = fopen(entrada,"r")) == NULL) {
+        fprintf(stderr,"Error al abrir el fichero %s.\n%s.\n",entrada,strerror(errno));
+        return 1;
+    }
+
+    while (fgets(buffer, 1024, fe) != NULL) {
+        values[i] = atoi(buffer);
+        i++;
+    }
+
+    NUM_USERS = values[0];
+    NUM_PARKING = values[1];
+    NUM_PLACES = values[2];
+    TIEMPO_MIN_COGER = values[3];
+    TIEMPO_MAX_COGER = values[4];
+    TIEMPO_MIN_MONTANDO = values[5];
+    TIEMPO_MAX_MONTANDO = values[6];
+
+    sem_parking = malloc(sizeof(sem_t)*NUM_PARKING);
+    sem_queue_departure = malloc(sizeof(sem_t)*NUM_PARKING);
+    sem_queue_arrival = malloc(sizeof(sem_t)*NUM_PARKING);
+
+    for(int i=0; i < NUM_PARKING; i++) {
+        sem_parking[i] = NULL;
+        sem_queue_arrival[i] = NULL;
+        sem_queue_departure[i] = NULL;
+    }
+
+    parking = malloc(sizeof(int*)*NUM_PARKING);
+
+    for(int i=0; i < NUM_PARKING; i++) {
+        parking[i] = malloc(sizeof(int)*NUM_PLACES);
+        for(int j=0; j < NUM_PLACES; j++) {
+            parking[i][j] = 0;
+        }
+    }
+    
+    statuts = malloc(sizeof(int*)*NUM_USERS);
+
+    for(int i=0; i < NUM_USERS; i++) {
+        statuts[i] = malloc(sizeof(int)*2);
+        for(int j=0; j < 2; j++) {
+            statuts[i][j] = 0;
+        }
+    }
+    
+    places_occupees = malloc(sizeof(int)*NUM_PARKING);
+    for(int i=0; i < NUM_PARKING; i++) places_occupees[i] = 0;
+
+    users = malloc(sizeof(pthread_t)*NUM_USERS);
+    
+    fclose(fe);
+
+    return 0;
+}
+
 void init_parking() {
+    // Données de départ
+    printf("BiciMAD: CONFIGURACION INICIAL\n");
+    printf("Usuarios: [%d]\n", NUM_USERS);
+    printf("Numero de Estaciones: [%d]\n", NUM_PARKING);
+    printf("Numero de huecos por estacion: [%d]\n", NUM_PLACES);
+    printf("Tiempo minimo de espera para decidir coger una bici: [%d]\n", TIEMPO_MIN_COGER);
+    printf("Tiempo maximo de espera para decidir coger una bici: [%d]\n", TIEMPO_MAX_COGER);
+    printf("Tiempo minimo que pasa un usuario montando una bici: [%d]\n", TIEMPO_MIN_MONTANDO);
+    printf("Tiempo maximo que pasa un usuario montando una bici: [%d]\n", TIEMPO_MAX_MONTANDO);
+    printf("\nSIMULACIÓN FUNCIONAMIENTO BiciMAD\n\n");
+
+    // Ecriture dans le fichier de sortie
+    fprintf(fs, "BiciMAD: CONFIGURACION INICIAL\n");
+    fprintf(fs, "Usuarios: [%d]\n", NUM_USERS);
+    fprintf(fs, "Numero de Estaciones: [%d]\n", NUM_PARKING);
+    fprintf(fs, "Numero de huecos por estacion: [%d]\n", NUM_PLACES);
+    fprintf(fs, "Tiempo minimo de espera para decidir coger una bici: [%d]\n", TIEMPO_MIN_COGER);
+    fprintf(fs, "Tiempo maximo de espera para decidir coger una bici: [%d]\n", TIEMPO_MAX_COGER);
+    fprintf(fs, "Tiempo minimo que pasa un usuario montando una bici: [%d]\n", TIEMPO_MIN_MONTANDO);
+    fprintf(fs, "Tiempo maximo que pasa un usuario montando una bici: [%d]\n", TIEMPO_MAX_MONTANDO);
+    fprintf(fs, "\nSIMULACIÓN FUNCIONAMIENTO BiciMAD\n\n");
+    
     // Initialisation des parking au 3/4 de sa capacité
-    for (int i = 0; i < NUM_PARKING; i++) {
+    for (int i=0; i < NUM_PARKING; i++) {
         for(int j=0; j < NUM_PLACES; j++) {
             parking[i][j] = 1;
             places_occupees[i]++;
-            printf("parking [%d]: [%d] places occupees, index=[%d]\n", i, places_occupees[i], j);
         }
-    }
-}
-
-void printStatuts() {
-    printf("[");
-    for(int i=0; i < NUM_USERS; i++) {
-        printf("[%d,%d]", statuts[i][0], statuts[i][1]);
-        if (i < (NUM_USERS-1)) printf(", ");
-        else printf("]\n");
     }
 }
 
@@ -61,10 +149,9 @@ void checkEnd(int user_id) {
 
     if (end == 0) {
         shouldTerminate = 0;
-        printf("Fin du programme\n");
-        printf("user_id: [%d]\n", user_id);
-        sleep(5);
-        printStatuts();
+        printf("Final del programa\n");
+        fprintf(fs, "Final del programa\n");
+        sleep(1);
 
         for(int i=0; i < NUM_USERS; i++) {
             // printf("[%d] statut: [%d,%d]\n", i, statuts[i][0], statuts[i][1]);
@@ -102,7 +189,10 @@ void* bici_arrival(void* args) {
 
     sem_wait(&sem_parking[parking_id]); // Attente du sémaphore pour accéder aux places de parking
 
-    printf("[%d] veut se gare au parking [%d], tentatives: %d\n", id, parking_id, tentatives);
+    if (tentatives == 1) {
+        printf(ORANGE "Usuario [%d] quiere dejar bici en Estacion [%d]\033[0m\n", id, parking_id);
+        fprintf(fs, "Usuario [%d] quiere dejar bici en Estacion [%d]\n", id, parking_id);
+    }
     // Recherche d'une place libre
     int parking_spot = -1;
     for (int i = 0; i < NUM_PLACES; i++) {
@@ -116,19 +206,13 @@ void* bici_arrival(void* args) {
 
                 if (value*(-1) > 0) {
                     sem_post(&sem_queue_departure[parking_id]); // Libérer un thread de la queue de départ
-                    printf(ORANGE "liberation queue depart\033[0m\n");
                 }
             }
 
-            printf(ROUGE "%d se gare a place [%d] au parking [%d]\n", id, parking_spot, parking_id);
-            printf(JAUNE "parking [%d]: [%d] places occupees, index=[%d]\033[0m\n", parking_id, places_occupees[parking_id], parking_spot);
-            
+            printf(ROUGE "Usuario [%d] deja bici en Estacion [%d]\033[0m\n", id, parking_id);
+            fprintf(fs, "Usuario [%d] deja bici en Estacion [%d]\n", id, parking_id);            
             break;
         }
-    }
-
-    if (parking_spot == -1) {
-        printf("[%d] Attend pour stationner au parking [%d]\n", id, parking_id);
     }
 
     sem_post(&sem_parking[parking_id]); // Libérer le sémaphore après avoir terminé
@@ -184,10 +268,16 @@ void* bici_departure(void* args) {
     gettimeofday(&currentTime, NULL);
     srand((unsigned int)(currentTime.tv_usec));
     
-    cogiendo = rand() % 4 + 1;
+    cogiendo = rand() % TIEMPO_MAX_COGER + TIEMPO_MIN_COGER;
     
-    printf("[%d] veut un velo au parking [%d], tentatives: %d\n", id, parking_id, tentatives);
+    if (tentatives == 1) {
+        printf("Usuario [%d] quiere coger bici de Estacion [%d]\n", id, parking_id);
+        fprintf(fs, "Usuario [%d] quiere coger bici de Estacion [%d]\n", id, parking_id);
+    }
+
     sleep(cogiendo);
+    printf(JAUNE "Usuario [%d] coge bici de Estacion [%d]\033[0m\n", id, parking_id);
+    fprintf(fs, "Usuario [%d] coge bici de Estacion [%d]\n", id, parking_id);
 
     // Recherche d'une place occupée
     int parking_spot = -1;
@@ -202,7 +292,6 @@ void* bici_departure(void* args) {
 
                 if (value*(-1) > 0) {                    
                     sem_post(&sem_queue_arrival[parking_id]);
-                    printf(ORANGE "liberation queue arrivee\033[0m\n");
                 }
             }
 
@@ -211,7 +300,7 @@ void* bici_departure(void* args) {
             gettimeofday(&currentTime, NULL);
             srand((unsigned int)(currentTime.tv_usec));
             
-            montando = rand() % 5 + 1;
+            montando = rand() % TIEMPO_MAX_MONTANDO + TIEMPO_MIN_MONTANDO;
 
             gettimeofday(&currentTime, NULL);
             srand((unsigned int)(currentTime.tv_usec));
@@ -219,14 +308,10 @@ void* bici_departure(void* args) {
             destination = rand() % (NUM_PARKING);
             while(destination == parking_id) destination = rand() % (NUM_PARKING);
             
-            printf(VERT "[%d] libere la place [%d] au parking [%d], destination: %d\n", id, parking_spot, parking_id, destination);
-            printf(JAUNE "parking [%d]: [%d] places occupees, index=[%d]\033[0m\n", parking_id, places_occupees[parking_id], parking_spot);
+            printf(VERT "Usuario [%d] montando en bici..., destination: Estacion [%d]\033[0m\n", id, destination);
+            fprintf(fs, "Usuario [%d] montando en bici..., destination: Estacion [%d]\n", id, destination);            
             break;
         }
-    }
-
-    if (parking_spot == -1) {
-        printf("[%d] Attend pour demarrer du parking [%d]\n", id, parking_id);
     }
 
     sem_post(&sem_parking[parking_id]); // Libérer le sémaphore après avoir terminé
@@ -269,7 +354,7 @@ void* bici_departure(void* args) {
     }
 
     free(data);
-    printf(BLEU "Fin du thread [%d], tentative: [%d]\033[0m\n", id, tentatives);
+
     if (shouldTerminate != 0) {
         statuts[id][0] = 1;
         statuts[id][1] = -1;
@@ -280,7 +365,52 @@ void* bici_departure(void* args) {
     return NULL;
 }
 
-int main() {
+void cleanVariableGlobale() {
+
+    for(int i=0; i < NUM_PARKING; i++) {
+        free(sem_parking[i]);
+        free(sem_queue_arrival[i]);
+        free(sem_queue_departure[i]);
+    }
+
+    for(int i=0; i < NUM_PARKING; i++) free(parking[i]);
+    for(int i=0; i < NUM_USERS; i++) free(statuts[i]);
+    free(places_occupees);
+    free(users);
+}
+
+int main(int argc, char *argv[]) {
+    char nombre_fe[100];
+    char nombre_fs[100];
+    char date_heure[100];
+    struct tm *temps_info;
+    time_t temps_actuel;
+
+    if (argc > 3) {
+        printf("Trop d'arguments\n");
+        return 0;
+    } else if (argc > 1) {
+        strcpy(nombre_fe, argv[1]);
+        if (argc == 3) strcpy(nombre_fs, argv[2]);
+    } else {
+        strcpy(nombre_fe, "entrada_BiciMAD.txt");
+        time(&temps_actuel);
+        temps_info = localtime(&temps_actuel);
+
+        strftime(date_heure, sizeof(date_heure), "%Y-%m-%d%H-%M-%S", temps_info);
+        strcpy(nombre_fs, "salida_sim_BiciMAD");
+        strcat(nombre_fs, date_heure);
+        strcat(nombre_fs, ".txt");
+    }
+
+    if ((fs = fopen(nombre_fs, "w")) == NULL) {
+        fprintf(stderr,"Error al abrir el fichero %s.\n%s.\n", nombre_fs, strerror(errno));
+        return 0;
+    }
+    if (openFile(nombre_fe) != 0) return 0;
+
+
+
     srand(time(NULL));
     init_parking();
 
@@ -305,6 +435,9 @@ int main() {
     for (int i = 0; i < NUM_USERS; i++) {
         pthread_join(users[i], NULL);
     }
+
+    fclose(fs);
+    cleanVariableGlobale();
 
     for(int i=0; i < NUM_PARKING; i++) {
         sem_destroy(&sem_parking[i]); // Destruction du sémaphore parking
