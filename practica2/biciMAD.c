@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <string.h>
 
 #define VERDE "\033[00;32m"
 #define ROJO "\033[00;31m"
@@ -77,12 +78,6 @@ int openFile(char *nombre_fe) {
     sem_parking = malloc(sizeof(sem_t)*NUM_PARKING);
     sem_queue_departure = malloc(sizeof(sem_t)*NUM_PARKING);
     sem_queue_arrival = malloc(sizeof(sem_t)*NUM_PARKING);
-
-    for(int i=0; i < NUM_PARKING; i++) {
-        sem_parking[i] = NULL;
-        sem_queue_arrival[i] = NULL;
-        sem_queue_departure[i] = NULL;
-    }
 
     parking = malloc(sizeof(int*)*NUM_PARKING);
 
@@ -379,12 +374,6 @@ void* bici_departure(void* args) {
 
 void cleanVariableGlobale() {
 
-    for(int i=0; i < NUM_PARKING; i++) {
-        free(sem_parking[i]);
-        free(sem_queue_arrival[i]);
-        free(sem_queue_departure[i]);
-    }
-
     for(int i=0; i < NUM_PARKING; i++) free(parking[i]);
     for(int i=0; i < NUM_USERS; i++) free(statuts[i]);
     free(places_occupees);
@@ -449,13 +438,14 @@ int main(int argc, char *argv[]) {
     }
 
     fclose(fs);
-    cleanVariableGlobale(); // Liberacion de memoria de los variables globales
 
     for(int i=0; i < NUM_PARKING; i++) {
         sem_destroy(&sem_parking[i]); // Destrucción del semáforo cola de parking
         sem_destroy(&sem_queue_departure[i]); // Destruction du sémaphore cola de salida
         sem_destroy(&sem_queue_arrival[i]); // Destrucción del semáforo cola de llegada
     }
+
+    cleanVariableGlobale(); // Liberacion de memoria de los variables globales
 
     return 0;
 }
